@@ -5,7 +5,6 @@
 ### [Project Description](docs/)
 This project uses *text mining*, *topic modeling*, and *sentiment analysis* to analyze the metal music's lyrics and gain a basic understanding of metal music. The report of this project can be considered as a mini wikipedia for people who don't know about metal music. 
 
-Term: Spring 2020
 
 + Projec title: Why do I dislike Metal Music? - Metal music mini wikipedia based on data
 + This project is conducted by Qin Zhang (qz2387)
