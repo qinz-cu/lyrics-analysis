@@ -1,0 +1,455 @@
+---
+title: "Why do I dislike Metal Music?"
+subtitle: "Metal music mini wikipedia based on data"
+output:
+  html_document: 
+    theme: flatly
+  html_notebook: 
+    theme:flatly
+---
+
+```{r echo=FALSE, out.height="550px", out.width="100%"}
+library(knitr)
+include_graphics("loudmusic.jpg")  ## the figure's path
+```
+
+
+
+
+
+
+I always dislike heavy metal music because of its loud, thick, and distored sound like the little boy in the picture does. However, **we should not judge anything without knowing it.** Then, how can I understand it more without hearing the loud sound? Fortunately, the lyrics data allows me to do so. To understand it more clearly, I used the my favoriate genre - pop music to compare with. Let's figure it out!
+
+
+
+
+
+
+
+
+
+
+## What is metal music about?
+
+
+
+```{r, warning = FALSE, message = FALSE, echo = FALSE}
+### load library
+library(tidyr)
+library(dplyr)  ## data manipulation
+library(ggplot2)
+library(tm)
+library(tidytext) 
+library(textdata)  
+library(RColorBrewer)
+library(devtools)  ## for installing wordcloud2
+devtools::install_github("lchiffon/wordcloud2")
+library(topicmodels)  ## for topic modeling
+library(radarchart)  ## draw radar chart
+library(htmlwidgets)
+library(wordcloud2)
+library(shiny)
+library(plotly) ## interactive plots
+library(igraph) ## word association
+library(ggraph) ## visualize word network
+```
+
+
+
+
+First, knowing what is metal music about can provide us with a bird view of it. In this part, *word frequency* of lyrics comparison between metal and pop music, and the *topic modeling* of metal music will be analyzed.
+
+
+
+
+
+
+
+
+
+
+### Lyrics comparison between metal and pop music
+
+
+
+
+
+
+Given the lyrics of metal and pop music, I used *tm* package to analyze the most frequently used words of each genre's lyrics to gain a basic information of what metal music is singing about. Then, *shiny* and *wordcloud2* packages are utilized to visualize the results. 
+
+
+
+```{r, warning = FALSE, message = FALSE, echo = FALSE}
+### load data
+load("metal.RData")
+load("pop.RData")
+
+### get tidy form of data
+tidy_metal = metal %>%
+  unnest_tokens(word, clean_lyrics) %>%
+  count(word, sort = TRUE)
+
+tidy_pop = pop %>%
+  unnest_tokens(word, clean_lyrics) %>%
+  count(word, sort = TRUE)
+```
+
+
+
+
+```{r echo=FALSE, out.height="400px", out.width="100%"}
+include_graphics("metal_wc.png")  ## the figure's path
+
+## can use wordcloud2(tidy_metal, figPath = "metal.png", size = 1.5, color='random-light', backgroundColor = "black") to produce this wordcloud image
+```
+
+
+
+
+
+```{r echo=FALSE, out.height="400px", out.width="100%"}
+include_graphics("pop_wc.png")  ## the figure's path
+
+## wordcloud2(tidy_pop, figPath = "pop.jpeg", size = 1.5, color = "random-light", backgroundColor = "azure") to produce this wordcloud image
+```
+
+
+
+
+
+
+
+
+
+
+From the wordclouds of metal (guitar shape) and pop music (singer shape), we can see that words like **life**, **lie**, and **kill** appear frequently than others, while pop music mainly contains **love**, **baby**, and **heart**. It seems that metal music mentions more about serious subjects, while pop music, obviously, talks more about love or youth. Only driven from lyrics, metal music has already made me feel heavy.
+
+
+
+
+
+
+
+
+
+
+### Topic of metal music
+
+
+
+
+
+
+Only counting the word frequency of lyrics is not thorough, so, what actually does metal music talk about? Without hearing the music, I could use the *topic modeling* by implementing *topicmodels* package to figure out the themes of it. Supposing three topics (*k = 3*) are included in these lyrics.
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# create dtm for model building
+metal_corpus = VCorpus(VectorSource(metal$clean_lyrics)) %>%
+  DocumentTermMatrix()
+
+k = 3  ## define 3 topics
+metal_model = LDA(x = metal_corpus, k, method = "Gibbs", control=list(seed=10005))
+
+metal_topics = tidy(metal_model, matrix = "beta"); metal_topics
+
+# the most common words within each topic and visualization
+metal_topics_words = metal_topics %>%
+  group_by(topic) %>%
+  top_n(15, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+```
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.align="center", fig.show="center"}
+metal_topics_words1 = metal_topics_words %>%
+  mutate(term = reorder_within(term, beta, topic))
+  
+topics_fg = ggplot(metal_topics_words1,aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered() +
+  scale_fill_manual("legend", values = c("gray40", "lightcoral", "lightskyblue3")) +    ## customize the bar colors
+  ggtitle("Three topics of metal music lyrics") +
+  theme_classic() +
+  theme(axis.line = element_blank()) + 
+  ylab("Probability of word appears in the topic") + 
+  xlab("Word")
+topics_fg
+```
+
+
+
+We can deduce from the high frequency words in each topic that topic 1 is mainly about **negative and anger** as dirty and violence words are included. Topic 2 probably talks about **life or love** just like pop music does. Finally, it appears that topic 3 concerns more about serious subjects such as **soul or death**. Also, words like **burn**, **blood**, or **war** might make people feel aggressive. From my perspective, I might only feel comportable with the content of topic 2 when listening to the music!
+
+
+
+
+
+
+
+
+
+
+## What emotions does metal music express?
+
+
+
+
+
+
+Mostly, we are feeling the emotions of artists or the songs and trying to find feelings in common when we listen to the music, whatever it is sad, miss, or inspiring. So, what kind of emotions does metal music want to express? In this section, *sentiment analysis* will be conducted to answer the question. To separate the emotions, the lexicon *nrc* in *tidytext* package will be used. Also, in order to have a clear understanding, the emotions of pop music are also being considered.
+
+
+
+```{r, echo=FALSE, fig.align="center"}
+# combine metal music and pop music
+tidy_total = tidy_metal %>%
+  mutate(genre = "Metal") %>%
+  bind_rows(mutate(tidy_pop, genre = "Pop"))
+
+# get nrc lexicon
+nrc = get_sentiments(lexicon = "nrc")
+
+total_sentiment = tidy_total %>%
+  inner_join(nrc, by = "word") %>%
+  filter(!grepl("positive|negative", sentiment)) %>%
+  count(genre, sentiment) %>%
+  spread(genre, n)
+
+# visualize
+c = col2rgb(c("tomato3","greenyellow"))  ## change the color to rgb using col2 rgb function
+chartJSRadar(total_sentiment, showLegend = FALSE, colMatrix = c, labelSize = 14) 
+```
+
+
+
+
+
+
+From the radarchart, we can see that metal music relatively expresses more **anger**, **disgust**, and **fear** compared with pop music, which discourages me from listening to it or even attempting to accept it. Indeed, pop music also contains these "negative" sentiment, but overall, the pop music shows these emotions more gently than metal music.
+
+
+
+
+
+
+```{r, echo = FALSE, fig.align="center", fig.show="center"}
+# positive and negative
+total_p_n = tidy_total %>%
+  inner_join(nrc, by = "word") %>%
+  filter(sentiment %in% c("positive","negative")) %>%
+  count(genre, sentiment) %>%
+  group_by(genre) %>%
+  mutate(proportion = n / sum(n)) %>%
+  ungroup()
+
+
+p_n = ggplot(total_p_n, aes(x = sentiment, y = proportion, fill = genre)) +
+  geom_bar(stat = "identity", position = "dodge", show.legend = FALSE) + 
+  ggtitle("Metal vs. Pop music lyrics comparison: the proportion of positive and negative sentiment") + 
+  theme(plot.title = element_text(face = "bold"))
+fig_a = ggplotly(p_n) %>% 
+  layout(showlegend = FALSE, plot_bgcolor='transparent') 
+div(fig_a, align = "center") ## set location of figure
+```
+
+
+
+
+
+
+Also, the proportion of positive and negative sentiment comparison in lyrics directly shows that pop music has relatively higher proportion of positive sentiment than metal music. I would choose pop music based on the result. Life needs more positive things right? 
+
+
+
+
+
+
+
+
+
+
+## How does metal music's sentiment change by year?
+
+
+
+After gaining a basic understanding of metal music, I am curious that what's the development of metal music? Does it always contain so much negative sentiment? To answer these questions, I analyzed the change of positive and negative sentiment proportion of metal music by year using *tidytext* and *textdata* packages.
+
+
+
+
+
+
+```{r, echo =FALSE, fig.align="center"}
+# get words tokenized
+tidy_metal_2 = metal %>%
+  unnest_tokens(word, clean_lyrics)
+
+# inner_join the lexicon
+tidy_metal_sentiment = tidy_metal_2 %>%
+  inner_join(nrc, by = "word") %>%
+  select(id, song, year, artist,sentiment, word, lyrics)
+
+total_words = tidy_metal_sentiment %>%
+  count(song) %>%
+  rename(total_words = n)
+
+tidy_metal_sentiment = tidy_metal_sentiment %>%
+  left_join(total_words, by = "song")
+
+# visualize boxplot of sentiment change by year
+# change of negative sentiment by year
+tidy_negative = tidy_metal_sentiment %>%
+  filter(sentiment == "negative") %>%
+  count(song, year, total_words) %>%
+  ungroup() %>%
+  mutate(percent = n / total_words,
+         year = 5 * floor(as.numeric(year)/5)) 
+
+negative_box =  ggplot(tidy_negative,aes(x = as.factor(year), y = percent, fill = as.factor(year))) +
+  geom_boxplot(show.legend = FALSE) + 
+  scale_fill_brewer(palette="Dark2") + 
+  labs(title = "The change of negative sentiment proportion in metal music by year") +
+  xlab("Year") + 
+  ylab("Negative proportion") +
+  theme(plot.title = element_text(face = "bold"))
+fig_b = ggplotly(negative_box) %>% 
+  layout(showlegend = FALSE, plot_bgcolor='transparent')
+div(fig_b, align = "center")
+# change of positive sentiment by year
+tidy_positive = tidy_metal_sentiment %>%
+  filter(sentiment == "positive") %>%
+  count(song, year, total_words) %>%
+  ungroup() %>%
+  mutate(percent = n / total_words,
+         year = 5 * floor(as.numeric(year)/5))
+
+positive_box =  ggplot(tidy_positive, aes(x = as.factor(year), y = percent, fill = as.factor(year))) +
+  geom_boxplot(show.legend = FALSE) + 
+  scale_fill_brewer(palette="BuPu") + 
+  labs(title = "The change of positive sentiment proportion in metal music by year") +
+  xlab("Year") + 
+  ylab("Positive proportion")+ 
+  theme(plot.title = element_text(face = "bold"))
+fig_c = ggplotly(positive_box) %>% 
+  layout(showlegend = FALSE, plot_bgcolor='transparent')
+div(fig_c, align = "center")
+```
+
+
+
+
+
+
+Based on the results, the negative proportion does not vary greatly with the time, but the number of outliers increases significantly from **group 2005** to **group 2010**, which is worth investigating deeply. The proportion of positive seems a little different. It has a small curve with the time passing by that the mean positive proportion reached the highest point in **group 1990** and I am interested in what happened at that time. After researching, it turns out year 1990 is a crossroad for metal music and the development of metal music went to a new level! Maybe I can communicate with heavy metal fans next time with knowing these information.
+
+
+
+
+
+
+
+
+
+
+## How can I avoid accidentally hearing the metal music?
+
+
+
+After prior analysis, I'm sure that I'm not into the metal music. Then, how can I avoid hearing the metal music when searching through the Spotify or other music platforms? Given the name of metal music, I analyzed the word association by tokenizing songs' name into *two grams* and visualized the word network utilizing *igraph* and *ggraph* packages to provide me with some hints about what metal music might be named of. Here is the word network.
+
+
+
+```{r, echo = FALSE, fig.align="center"}
+### tokenize the clean_song column
+metal_song = metal %>%
+  unnest_tokens(bigram, clean_song, token = "ngrams",n = 2) %>%
+  filter(!is.na(bigram)) %>%
+  separate(bigram, c("word1", "word2"), sep = " ") %>%
+  count(word1, word2, sort = TRUE)
+
+### create the graph_from_data_frame for visualization
+metal_song_graph = metal_song %>%
+  filter(n >= 3) %>%     ## filter the most frequently pair of words
+  graph_from_data_frame()
+
+###
+set.seed(2020)
+
+a <- grid::arrow(type = "closed", length = unit(.15, "inches"))  ## drow arrow
+
+ggraph(metal_song_graph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n),label_alpha = 0.3, arrow = a, show.legend = FALSE) +
+  geom_node_point(color = "lightblue", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1, check_overlap = TRUE) +
+  theme_void()
+```
+
+
+
+
+
+
+We can see that if the song's name follows or followed by the words like **death**, **black**, or **blood**, it is highly possible that this is a metal music song! Promise me, lower your phone's sound before clicking on it!
+
+
+
+
+
+
+
+
+
+
+## Summary
+
+
+
+
+
+
+Through this analysis, we can draw the following conclusions:
+
+* In general, metal music mainly covers serious topics like soul, death, or life thinking. 
+* As the aspect of emotion, metal music relatively expresses more aggressive sentiment like anger, fear, and disgust compared with pop music.
+* From the time dimension, the positive sentiment proportion of metal music varies slightly with year and the year 1990 seems like a milestone of metal music's development.
+* The metal music song's name probably contains words like black, death, or blood.
+
+As I am in favor of joyful music and do not like negative sentiment like anger or even disgust, I guess I have more reasons to dislike metal music right now. (But I totally respect metal music fans.) Next time, if someone asks me why I dislike metal music, I could say more than just one sentence "it is too loud"!
+
+
+
+
+
+
+```{r echo=FALSE, out.height="500px", out.width="100%"}
+library(knitr)
+include_graphics("metalconcert.jpg")  ## the figure's path
+```
+
+
+
+
+
+
+
+
+
+
+
+## References
+
+
+
+
+
+
+1. Silge, J., & Robinson, D. (2017). [Text Mining with R: A Tidy Approach](https://www.tidytextmining.com/).
+
+
+
+
